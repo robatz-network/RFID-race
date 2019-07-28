@@ -13,14 +13,14 @@
 #define   LED_Green   17
 #define   LED_Blue    5
  
-#define   ssid        "cyberspot"
-#define   password    "cyberspot19"
+#define   ssid        "Room89"
+#define   password    "room8989"
 
 int httpResponseCode;
 String localuid; 
 String message;
 int Number_of_RFID_marks = 0;
-unsigned long Last_send_time;
+unsigned long Last_send_time, Test_time;
 
 struct result{
   String uid;
@@ -32,7 +32,7 @@ struct result raceInfo[ARRAYSIZE] ;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 bool Connected_to_WiFi();
-bool Send_information();
+bool Send_information(bool Full_clear = true, bool Send_last_only = false);
 void Check_RFID_scaner();
 String Race_info_message();
 
@@ -52,14 +52,21 @@ void setup() {
   
     mfrc522.PCD_Init(); 
     mfrc522.PCD_DumpVersionToSerial(); 
-
+    Test_time = millis();
     Last_send_time = millis();
 }
  
 void loop() {
  Check_RFID_scaner();
+ if (millis() - Test_time >= 4000) {
+   if ((Number_of_RFID_marks > 0) && Connected_to_WiFi()) {
+    Send_information(false, true);
+   }
+   Test_time = millis();
+ }
  if ( (millis() - Last_send_time >= 27000) && (Connected_to_WiFi()) ) {
    Send_information();   
+   Last_send_time = millis();
  }
 }
 
@@ -92,9 +99,8 @@ void Check_RFID_scaner(){
 
 bool Connected_to_WiFi(){
   WiFi.begin(ssid, password);
-  delay(3000);
+  delay(1250);
   Serial.print(" Wifi status " ); Serial.println(WiFi.status());
-  Last_send_time = millis();
   if (WiFi.status() != WL_CONNECTED) { 
     Serial.println("WiFi didn't connect");
     return false;
@@ -103,27 +109,49 @@ bool Connected_to_WiFi(){
     return true;
 }
 
-bool Send_information() {
-
+bool Send_information(bool Full_clear, bool Send_last_only) {
 
    HTTPClient http;   
    http.begin("http://roader.herokuapp.com/api/devices/flush");  
    http.addHeader("Content-Type", "text/plain"); 
-   Race_info_message();            
-   Serial.println(message);
-   
+   if (!Send_last_only) {
+    message += ("General post is consist of" + String(Number_of_RFID_marks) + " marks\n");
+    Race_info_message();            
+    Serial.println(message);
+    httpResponseCode = http.POST(message);  
+    message = "";
+   }
+   else {
+    message += "Last registered mark\n";
+    message += WiFi.macAddress();
+    message += "\t";
+    message += raceInfo[Number_of_RFID_marks-1].uid;
+    message += "\t";
+    message += raceInfo[Number_of_RFID_marks-1].Time;
+    message += "\n";
+    Serial.println(message);
+    httpResponseCode = http.POST(message);  
+    message = "";
+   }
    if (Number_of_RFID_marks > 0) {
     
     digitalWrite(LED_Blue, LOW);
-    httpResponseCode = http.POST(message);  
-    Number_of_RFID_marks = 0;
-       
+   
     if(httpResponseCode>0) {
       String response = http.getString();                       
       Serial.print("http Response Code");Serial.print(httpResponseCode); Serial.println(response);           
       http.end(); 
       WiFi.disconnect();
       Serial.println("WiFi.disconnect()");
+      if (Full_clear) {
+        for (int j = 0; j < Number_of_RFID_marks ; j++) {
+          raceInfo[j].uid = ""; //Clear the array of raceInfo
+          raceInfo[j].Time = 0;  
+        }
+        Number_of_RFID_marks = 0;
+        message = "";
+        Serial.println("Full Clear was end");
+      }
       message = "";
       digitalWrite(LED_Blue, HIGH); 
       return true;
@@ -142,7 +170,7 @@ bool Send_information() {
    }
 } 
 
-String Race_info_message() {
+void Race_info_message() {
 
   for ( int j = 0; j < Number_of_RFID_marks; j++ ) {   //Make message and send it to ESP32 with server on board
     message += WiFi.macAddress();
@@ -151,8 +179,5 @@ String Race_info_message() {
     message += "\t";
     message += raceInfo[j].Time;
     message += "\n";
-    raceInfo[j].uid = ""; //Clear the array of raceInfo
-    raceInfo[j].Time = 0;
   }
-  return("pp");
 }
