@@ -5,19 +5,18 @@
 #include <MFRC522.h>
 #include <TaskScheduler.h>
 
-#define   ARRAYSIZE   200
-#define   buttonPin   13
-#define   RST_PIN     22
-#define   SS_PIN      21
+#define   ARRAYSIZE         200
+#define   RST_PIN           22
+#define   SS_PIN            21
 
-#define   LED_Red     16
-#define   LED_Green   17
-#define   LED_Blue    5
+#define   LED_Red           16
+#define   LED_Green         17
+#define   LED_Blue          5
 
-//#define Battery_Voltage 4
+#define   Battery_Voltage   4
 
-#define   ssid        "Room89"
-#define   password    "room8989"
+#define   ssid              "Room89"
+#define   password          "room8989"
 
 Scheduler rfidScheduler;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -32,11 +31,13 @@ int httpResponseCode;
 int Number_of_RFID_marks = 0;
 String localuid;
 String message;
-
+int pin_voltage = 0;
+float voltage_in = 0.0;
 bool Connected_to_WiFi();
 void Send_information(bool Full_clear , bool Send_last_only );
 void Check_RFID_scaner();
 String Race_info_message();
+float Battery_voltage();
 
 
 void decor_1 () {
@@ -52,17 +53,9 @@ Task taskShortSend (TASK_SECOND * 5, TASK_FOREVER, &decor_1);
 Task taskGlobalSend (TASK_SECOND * 27, TASK_FOREVER, &decor_2);
 
 void setup() {
-  Serial.begin(115200);
+ 
   SPI.begin();
-  WiFi.mode(WIFI_STA);
-  pinMode (LED_Red, OUTPUT);
-  pinMode (LED_Green, OUTPUT);
-  pinMode (LED_Blue, OUTPUT);
-  digitalWrite(LED_Red, HIGH);
-  digitalWrite(LED_Green, HIGH);
-  digitalWrite(LED_Blue, HIGH);
-  pinMode(buttonPin, INPUT_PULLUP);
-
+  Serial.begin(115200);
   mfrc522.PCD_Init();
   mfrc522.PCD_DumpVersionToSerial();
 
@@ -73,6 +66,13 @@ void setup() {
   taskGlobalSend.enable();
   taskShortSend.enable();
   taskCheckRFID.enable();
+
+  WiFi.mode(WIFI_STA);
+  
+  pinMode (LED_Red,       INPUT_PULLUP);
+  pinMode (LED_Green,     INPUT_PULLUP);
+  pinMode (LED_Blue,      INPUT_PULLUP);
+  pinMode (Battery_Voltage,INPUT);
 
 }
 
@@ -93,7 +93,7 @@ void Check_RFID_scaner() {
   for (int k = 0; k < 4; k++) {
     uidString += String(mfrc522.uid.uidByte[k]);  //Create String with UID
   }
-
+  pinMode (LED_Green, OUTPUT); 
   digitalWrite(LED_Green, LOW);
   Serial.println("Detected:");
   Serial.println(uidString);
@@ -107,6 +107,8 @@ void Check_RFID_scaner() {
   Serial.println(Number_of_RFID_marks);
   delay(100);
   digitalWrite(LED_Green, HIGH);
+  pinMode (LED_Green,INPUT_PULLUP);
+  
 }
 
 
@@ -147,8 +149,9 @@ void Send_information(bool Full_clear, bool Send_last_only) {
     else return;
   }
   if (Number_of_RFID_marks > 0) {
-
+    pinMode (LED_Blue, OUTPUT);
     digitalWrite(LED_Blue, LOW);
+
 
     if (httpResponseCode > 0) {
       String response = http.getString();
@@ -164,7 +167,9 @@ void Send_information(bool Full_clear, bool Send_last_only) {
         Number_of_RFID_marks = 0;
         Serial.println("Full Clear was end");
       }
+      delay(150);
       digitalWrite(LED_Blue, HIGH);
+      pinMode (LED_Blue,INPUT_PULLUP); 
       return;
     }
 
@@ -172,10 +177,11 @@ void Send_information(bool Full_clear, bool Send_last_only) {
       Serial.print("Error on sending POST: "); Serial.println(httpResponseCode);
       http.end();
       WiFi.disconnect();
-      digitalWrite(LED_Blue, HIGH);
+      pinMode (LED_Red,OUTPUT); 
       digitalWrite(LED_Red, LOW);
       delay(1000);
       digitalWrite(LED_Red, HIGH);
+      pinMode (LED_Red,INPUT_PULLUP); 
       return;
     }
   }
@@ -205,3 +211,10 @@ String Race_info_message(bool SLO) {
   }
   return (msg);
 }
+
+float Battery_voltage(){
+  pin_voltage = analogRead(Battery_Voltage); // измерение 
+  voltage_in = (pin_voltage * 4.77) / 1023; // пересчет измерения в вольты 
+  return voltage_in;
+  }
+  
