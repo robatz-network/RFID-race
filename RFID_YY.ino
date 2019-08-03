@@ -13,7 +13,7 @@
 #define   LED_Green         17
 #define   LED_Blue          5
 
-#define   Battery_Voltage   4
+#define   Voltage_Pin       4
 
 #define   ssid              "Room89"
 #define   password          "room8989"
@@ -27,17 +27,20 @@ struct result {
 };
 
 struct result raceInfo[ARRAYSIZE];
+
 int httpResponseCode;
 int Number_of_RFID_marks = 0;
+
 String localuid;
 String message;
-int pin_voltage = 0;
-float voltage_in = 0.0;
+
+
+
 bool Connected_to_WiFi();
 void Send_information(bool Full_clear , bool Send_last_only );
 void Check_RFID_scaner();
 String Race_info_message();
-float Battery_voltage();
+float Get_Battery_Voltage();
 
 
 void decor_1 () {
@@ -72,7 +75,7 @@ void setup() {
   pinMode (LED_Red,       INPUT_PULLUP);
   pinMode (LED_Green,     INPUT_PULLUP);
   pinMode (LED_Blue,      INPUT_PULLUP);
-  pinMode (Battery_Voltage,INPUT);
+  pinMode (Voltage_Pin,   INPUT);
 
 }
 
@@ -187,9 +190,9 @@ void Send_information(bool Full_clear, bool Send_last_only) {
   }
 }
 
-String Race_info_message(bool SLO) {
+String Race_info_message(bool Send_All) {
   String msg = "";
-  if (SLO) {
+  if (Send_All) {
       msg += ("General post is consist of " + String(Number_of_RFID_marks) + " marks\n");
     for ( int j = 0; j < Number_of_RFID_marks; j++ ) {   //Make message and send it to ESP32 with server on board
       msg += WiFi.macAddress();
@@ -199,6 +202,8 @@ String Race_info_message(bool SLO) {
       msg += raceInfo[j].Time;
       msg += "\n";
     }
+    msg += String(Get_Battery_Voltage());
+    msg += "\n";
   }
   else {
       msg += "Last registered mark\n";
@@ -212,9 +217,11 @@ String Race_info_message(bool SLO) {
   return (msg);
 }
 
-float Battery_voltage(){
-  pin_voltage = analogRead(Battery_Voltage); // измерение 
-  voltage_in = (pin_voltage * 4.77) / 1023; // пересчет измерения в вольты 
-  return voltage_in;
+float Get_Battery_Voltage(){
+  int Val = 0;
+  float Voltage_In = 0;
+  Val = analogRead(Voltage_Pin); // "Analog" value of selected pin
+  Voltage_In = (Val) / 1023; // Conversion to voltage
+  return Voltage_In;
   }
   
