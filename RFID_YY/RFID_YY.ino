@@ -5,77 +5,56 @@
 #include <MFRC522.h>
 #include <TaskScheduler.h>
 
-#define ARRAYSIZE 200
 #define RST_PIN 22
 #define SS_PIN 21
+#define VOLTAGE_PIN 4
 
-#define LED_Red 16
-#define LED_Green 17
-#define LED_Blue 5
+#define LED_RED 16
+#define LED_GREEN 17
+#define LED_BLUE 5
 
-#define Voltage_Pin 4
-
-#define ssid "Room89"
-#define password "room8989"
+#define WIFI_SSID "Room89"
+#define WIFI_PASS "room8989"
 
 Scheduler rfidScheduler;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-struct result {
+struct WaypointScan {
     String uid;
-    unsigned long Time;
+    unsigned long time;
 };
 
-struct result raceInfo[ARRAYSIZE];
+struct WaypointScan waypoints[200];
+int nextWaypointIdx = 0;
+void checkRFIDScanner();
+void flushData();
+String formatWaypoint(const WaypointScan &wpt);
+String formatBatteryVoltage(const uint16_t voltage);
+void blinkLed(const uint8_t, const uint32_t);
+uint16_t getBatteryVoltage();
 
-int httpResponseCode;
-int Number_of_RFID_marks = 0;
-
-String localuid;
-String message;
-
-bool Connected_to_WiFi();
-void Send_information(bool Full_clear, bool Send_last_only);
-void Check_RFID_scaner();
-String Race_info_message();
-float Get_Battery_Voltage();
-
-void decor_1()
-{
-    Send_information(false, true);
-}
-
-void decor_2()
-{
-    Send_information(true, false);
-}
-
-Task taskCheckRFID(TASK_SECOND * 0.10, TASK_FOREVER, &Check_RFID_scaner);
-Task taskShortSend(TASK_SECOND * 5, TASK_FOREVER, &decor_1);
-Task taskGlobalSend(TASK_SECOND * 27, TASK_FOREVER, &decor_2);
+Task taskCheckRFID(TASK_SECOND * 0.1, TASK_FOREVER, &checkRFIDScanner);
+Task taskFlushData(TASK_SECOND * 30, TASK_FOREVER, &flushData);
 
 void setup()
 {
-
     SPI.begin();
     Serial.begin(115200);
     mfrc522.PCD_Init();
     mfrc522.PCD_DumpVersionToSerial();
 
     rfidScheduler.addTask(taskCheckRFID);
-    rfidScheduler.addTask(taskShortSend);
-    rfidScheduler.addTask(taskGlobalSend);
+    rfidScheduler.addTask(taskFlushData);
 
-    taskGlobalSend.enable();
-    taskShortSend.enable();
+    taskFlushData.enable();
     taskCheckRFID.enable();
 
     WiFi.mode(WIFI_STA);
 
-    pinMode(LED_Red, INPUT_PULLUP);
-    pinMode(LED_Green, INPUT_PULLUP);
-    pinMode(LED_Blue, INPUT_PULLUP);
-    pinMode(Voltage_Pin, INPUT);
+    pinMode(LED_RED, INPUT_PULLUP);
+    pinMode(LED_GREEN, INPUT_PULLUP);
+    pinMode(LED_BLUE, INPUT_PULLUP);
+    pinMode(VOLTAGE_PIN, INPUT);
 }
 
 void loop()
@@ -83,147 +62,99 @@ void loop()
     rfidScheduler.execute();
 }
 
-void Check_RFID_scaner()
+void checkRFIDScanner()
 {
+    if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+        return;
+    }
 
-    if (!mfrc522.PICC_IsNewCardPresent()) {
-        return;
-    }
-    if (!mfrc522.PICC_ReadCardSerial()) {
-        return;
-    }
     String uidString;
 
-    for (int k = 0; k < 4; k++) {
-        uidString += String(mfrc522.uid.uidByte[k]); // Create String with UID
+    for (int i = 0; i < 4; i++) {
+        uidString += String(mfrc522.uid.uidByte[i]);
     }
-    pinMode(LED_Green, OUTPUT);
-    digitalWrite(LED_Green, LOW);
-    Serial.println("Detected:");
-    Serial.println(uidString);
 
-    if (!(localuid == uidString)) {
-        raceInfo[Number_of_RFID_marks].uid = uidString;
-        raceInfo[Number_of_RFID_marks].Time = millis();
-        localuid = uidString;
-        Number_of_RFID_marks++;
+    if (nextWaypointIdx > 0 && waypoints[nextWaypointIdx - 1].uid != uidString) {
+        waypoints[nextWaypointIdx].uid = uidString;
+        waypoints[nextWaypointIdx].time = millis();
+        nextWaypointIdx++;
+        flushData();
     }
-    Serial.println(Number_of_RFID_marks);
-    delay(100);
-    digitalWrite(LED_Green, HIGH);
-    pinMode(LED_Green, INPUT_PULLUP);
+
+    blinkLed(LED_GREEN, 100);
 }
 
-bool Connected_to_WiFi()
+bool connectWifi()
 {
-    WiFi.begin(ssid, password);
-    delay(1250);
-    Serial.print(" Wifi status ");
-    Serial.println(WiFi.status());
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi didn't connect");
-        return false;
-    } else
+    if (WiFi.status() == WL_CONNECTED) {
         return true;
+    }
+
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+    int counter = 0;
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(250);
+        counter++;
+        if (counter >= 8) {
+            WiFi.disconnect();
+            return false;
+        }
+    }
+
+    return true;
 }
 
-void Send_information(bool Full_clear, bool Send_last_only)
+void flushData()
 {
-    if (!Connected_to_WiFi()) {
+    if (!connectWifi()) {
         return;
     }
 
+    int httpResponseCode;
     HTTPClient http;
     http.begin("http://roader.herokuapp.com/api/devices/flush");
     http.addHeader("Content-Type", "text/plain");
-    if (!Send_last_only) {
-        Serial.println("Sendling all list message");
-        message += Race_info_message(!Send_last_only);
-        Serial.print(message);
-        httpResponseCode = http.POST(message);
-        message = "";
-    } else {
-        if (Number_of_RFID_marks > 0) {
-            message += Race_info_message(!Send_last_only);
-            Serial.print(message);
-            httpResponseCode = http.POST(message);
-            message = "";
-        } else
-            return;
+    String data;
+
+    for (int i = 0; i < nextWaypointIdx; i++) {
+        data += formatWaypoint(waypoints[i]) + "\n";
     }
-    if (Number_of_RFID_marks > 0) {
-        pinMode(LED_Blue, OUTPUT);
-        digitalWrite(LED_Blue, LOW);
 
-        if (httpResponseCode > 0) {
-            String response = http.getString();
-            Serial.print("http Response Code");
-            Serial.print(httpResponseCode);
-            Serial.println(response);
-            http.end();
-            WiFi.disconnect();
-            Serial.println("WiFi.disconnect()\n");
-            if (Full_clear) {
-                for (int j = 0; j < Number_of_RFID_marks; j++) {
-                    raceInfo[j].uid = ""; // Clear the array of raceInfo
-                    raceInfo[j].Time = 0;
-                }
-                Number_of_RFID_marks = 0;
-                Serial.println("Full Clear was end");
-            }
-            delay(150);
-            digitalWrite(LED_Blue, HIGH);
-            pinMode(LED_Blue, INPUT_PULLUP);
-            return;
-        }
+    data += formatBatteryVoltage(getBatteryVoltage()) + "\n";
+    httpResponseCode = http.POST(data);
+    http.end();
+    WiFi.disconnect();
 
-        else {
-            Serial.print("Error on sending POST: ");
-            Serial.println(httpResponseCode);
-            http.end();
-            WiFi.disconnect();
-            pinMode(LED_Red, OUTPUT);
-            digitalWrite(LED_Red, LOW);
-            delay(1000);
-            digitalWrite(LED_Red, HIGH);
-            pinMode(LED_Red, INPUT_PULLUP);
-            return;
-        }
+    if (httpResponseCode == 200) {
+        nextWaypointIdx = 0;
+        blinkLed(LED_BLUE, 150);
+    } else {
+        blinkLed(LED_RED, 1000);
     }
 }
 
-String Race_info_message(bool Send_All)
+uint16_t getBatteryVoltage()
 {
-    String msg = "";
-    if (Send_All) {
-        msg += ("General post is consist of " + String(Number_of_RFID_marks) + " marks\n");
-        for (int j = 0; j < Number_of_RFID_marks; j++) { // Make message and send it to ESP32 with server on board
-            msg += WiFi.macAddress();
-            msg += "\t";
-            msg += raceInfo[j].uid;
-            msg += "\t";
-            msg += raceInfo[j].Time;
-            msg += "\n";
-        }
-        msg += String(Get_Battery_Voltage());
-        msg += "\n";
-    } else {
-        msg += "Last registered mark\n";
-        msg += WiFi.macAddress();
-        msg += "\t";
-        msg += raceInfo[Number_of_RFID_marks - 1].uid;
-        msg += "\t";
-        msg += raceInfo[Number_of_RFID_marks - 1].Time;
-        msg += "\n";
-    }
-    return (msg);
+    return analogRead(VOLTAGE_PIN);
 }
 
-float Get_Battery_Voltage()
+void blinkLed(const uint8_t pin, const uint32_t ms)
 {
-    int Val = 0;
-    float Voltage_In = 0;
-    Val = analogRead(Voltage_Pin); // "Analog" value of selected pin
-    Voltage_In = (Val) / 1023;     // Conversion to voltage
-    return Voltage_In;
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+    delay(ms);
+    digitalWrite(pin, HIGH);
+    pinMode(pin, INPUT_PULLUP);
+}
+
+String formatWaypoint(const WaypointScan &wpt)
+{
+    return "rfid_scanned\t" + WiFi.macAddress() + "\t" + wpt.uid + "\t" + wpt.time;
+}
+
+String formatBatteryVoltage(const uint16_t voltage)
+{
+    return "voltage\t" + WiFi.macAddress() + "\t" + voltage + "\t" + millis();
 }
