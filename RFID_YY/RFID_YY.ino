@@ -74,7 +74,7 @@ void checkRFIDScanner()
         uidString += String(mfrc522.uid.uidByte[i]);
     }
 
-    if (nextWaypointIdx > 0 && waypoints[nextWaypointIdx - 1].uid != uidString) {
+    if (nextWaypointIdx == 0 || (nextWaypointIdx > 0 && waypoints[nextWaypointIdx - 1].uid != uidString)) {
         waypoints[nextWaypointIdx].uid = uidString;
         waypoints[nextWaypointIdx].time = millis();
         nextWaypointIdx++;
