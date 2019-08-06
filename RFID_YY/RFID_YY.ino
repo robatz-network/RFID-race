@@ -97,7 +97,7 @@ bool connectWifi()
     while (WiFi.status() != WL_CONNECTED) {
         unsigned long wifiTime = millis(); 
         counter++;
-        while (millis - wifiTime <= 250) {}
+        while (millis() - wifiTime <= 250) {}
         if (counter >= 8) {
             WiFi.disconnect();
             return false;
