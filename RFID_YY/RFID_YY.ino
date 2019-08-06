@@ -95,8 +95,9 @@ bool connectWifi()
     int counter = 0;
 
     while (WiFi.status() != WL_CONNECTED) {
-        delay(250);
+        unsigned long wifiTime = millis(); 
         counter++;
+        while (millis - wifiTime <= 250) {}
         if (counter >= 8) {
             WiFi.disconnect();
             return false;
@@ -143,8 +144,9 @@ uint16_t getBatteryVoltage()
 void blinkLed(const uint8_t pin, const uint32_t ms)
 {
     pinMode(pin, OUTPUT);
+    unsigned long currentTime = millis();
     digitalWrite(pin, LOW);
-    delay(ms);
+    while (millis() - currentTime <= ms) {}
     digitalWrite(pin, HIGH);
     pinMode(pin, INPUT_PULLUP);
 }
