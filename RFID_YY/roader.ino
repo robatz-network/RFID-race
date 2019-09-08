@@ -24,7 +24,7 @@
 #define BUTTON_PIN  32
 
 #define WIFI_RETRIES 30
-#define WIFI_SSID "Room89"
+#define WIFI_SSID "Roomi89"
 #define WIFI_PASS "room8989"
 #define AUTO_FLUSH_INTERVAL (35000UL)
 
@@ -37,7 +37,7 @@ float vin = 0.0;
 float k_divider = 4.83; // resistor divider 47k 12k
 float v_ref_ADC = 1.1;
 int value = 0;
-int startAddr = 0;
+int lastAddr = 0;
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
@@ -76,18 +76,17 @@ void setup()
   mfrc522.PCD_DumpVersionToSerial();
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   Serial.print("compiled: ");
-  Serial.print(__DATE__);
-  Serial.println(__TIME__);
+  Serial.print(DATE);
+  Serial.println(TIME);
   
   Rtc.Begin();
   
   EEPROM.begin(128);
   
-  RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+  RtcDateTime compiled = RtcDateTime(DATE, TIME);
   Rtc.SetDateTime(compiled);
   
   WiFi.mode(WIFI_OFF);
-  
   btStop();
   
   setupLed(LED_RED);
@@ -98,10 +97,10 @@ void setup()
   
   rfidScanEvents[nextRfidScanEventIdx].voltage = analogRead(VOLTAGE_PIN);
   
-  xTaskCreate(&flushDataTask, "flushDataTask", 8192, NULL, 1, NULL);
-  xTaskCreate(&checkRfidScannerTask, "checkRfidScannerTask", 8192, NULL, 5, NULL);
+  xTaskCreate(&flushDataTask, "flushDataTask", 8192, NULL, 1, NULL, 0);
+  xTaskCreate(&checkRfidScannerTask, "checkRfidScannerTask", 8192, NULL, 5, NULL, 0);   //Change last arg to 1 to enable multi-core processing
   
-  delay(3000);
+  delay(2000);
   
   sleepStart();
 }
@@ -110,6 +109,8 @@ void loop()
 {
   //infinite loop
 }
+
+
 
 void checkRfidScannerTask(void *parameter)
 {
@@ -121,6 +122,8 @@ void checkRfidScannerTask(void *parameter)
   vTaskDelete(NULL);
 }
 
+
+
 void flushDataTask(void *parameter)
 {
   for (;;)
@@ -128,12 +131,13 @@ void flushDataTask(void *parameter)
     if (lastFlushAttemptAt == 0 || millis() - lastFlushAttemptAt >= AUTO_FLUSH_INTERVAL)
     {
       flushData();
-
     }
     vTaskDelay(1000);
   }
   vTaskDelete(NULL);
 }
+
+
 
 void checkRfidScanner()
 {
@@ -143,49 +147,42 @@ void checkRfidScanner()
     {
       return;
     }
-
-    String uidString;
-    uidString = "";
+    String uidString = "";
     for (int i = 0; i < 4; i++)
     {
       rfidScanEvents[nextRfidScanEventIdx].uid[i] = mfrc522.uid.uidByte[i];
       uidString += String(rfidScanEvents[nextRfidScanEventIdx].uid[i]);
       Serial.println(rfidScanEvents[nextRfidScanEventIdx].uid[i]);
     }
-      Serial.println(uidString + " and " + (String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[0]) + String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[1]) + String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[2]) + String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[2])));
     
     blinkLed(LED_GREEN, 500);
     
     if (nextRfidScanEventIdx == 0 || (nextRfidScanEventIdx > 0 && (String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[0]) + String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[1]) + String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[2]) + String(rfidScanEvents[nextRfidScanEventIdx - 1].uid[2]))  != uidString))
     {
-      Serial.println("RtcTime");
-      
       RtcDateTime now = Rtc.GetDateTime();
-      
       rfidScanEvents[nextRfidScanEventIdx].time = now.Epoch32Time();
       rfidScanEvents[nextRfidScanEventIdx].checkSum = sizeof(rfidScanEvents[nextRfidScanEventIdx].uid) + sizeof(rfidScanEvents[nextRfidScanEventIdx].voltage) + sizeof(rfidScanEvents[nextRfidScanEventIdx].time);
-      Serial.println("EEPROM COMMIT");
-      EEPROM.put(startAddr, rfidScanEvents[nextRfidScanEventIdx]);
+      EEPROM.put(Addr, rfidScanEvents[nextRfidScanEventIdx]);
+      lastAddr += sizeof(RfidScanEvent);
       EEPROM.commit();
-      Serial.println(" EEPROM COMMIT + TEST END ");
       nextRfidScanEventIdx++;
     }
-
-    if (nextRfidScanEventIdx > 0)
+if (nextRfidScanEventIdx > 0)
     {
       flushData();
     }
   }
 }
 
+
+
 bool connectWifi()
 {
-
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-
   if (WiFi.status() == WL_CONNECTED)
   {
+    Serial.println("WIFI OK");
     return true;
   }
 
@@ -206,6 +203,8 @@ bool connectWifi()
   return true;
 }
 
+
+
 void flushData()
 {
   onLed(LED_BLUE);
@@ -215,6 +214,7 @@ void flushData()
   {
     blinkLed(LED_BLUE, 500);
     blinkLed(LED_RED, 250, 3);
+    sleepStart();
     return;
   }
 
@@ -227,16 +227,22 @@ void flushData()
   
   RfidScanEvent MessageEvent; 
   EEPROM.get(startAddr, MessageEvent);
-  
-  Serial.println(MessageEvent.uid[0]);
-  Serial.println(MessageEvent.time);
-  
-  String Msg = String(MessageEvent.uid[0]) + String(MessageEvent.uid[1]) + String(MessageEvent.uid[2]) + String(MessageEvent.uid[3]) + "   " + String(MessageEvent.time) + "   " + String(MessageEvent.voltage) + "    " + String(MessageEvent.checkSum);
-  
-  Serial.println("GREK ZDES TEST IDET: ");
-  Serial.println(Msg);
-  httpResponseCode = http.POST(Msg);
-  http.end();
+  int currentAddr = 0;
+  if (nextRfidScanEventIdx > 0)
+  { 
+    while( currentAddr <= lastAddr ) {
+      EEPROM.get(currentAddr, MessageEvent);
+      data += formhttpMessage(MessageEvent);
+      currentAddr += sizeof(RfidScanEvent);
+      Serial.println(String(MessageEvent.voltage) + String(MessageEvent.time));
+    }
+  }
+  else
+  {
+    data = "Voltage Only: " + String(MessageEvent.voltage);
+  }
+    httpResponseCode = http.POST(data);
+    http.end();
   WiFi.disconnect();
   delay(500);
   
@@ -258,25 +264,21 @@ void flushData()
     blinkLed(LED_RED, 250, 3);
   }
   sleepStart();
-} 
+}
+
+
 
 void sleepStart()
 {
-  Serial.println(analogRead(BUTTON_PIN));
-  delay(666);
-  Serial.println("Sleep Time");
+  delay(600);
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1);
   esp_light_sleep_start();
-  esp_sleep_wakeup_cause_t wakeup_reason;
-  wakeup_reason = esp_sleep_get_wakeup_cause();
-  switch (wakeup_reason)
-  {
-    case 1  : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
-    case 2  : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
-    case 3  : Serial.println("Wakeup caused by timer"); break;
-    case 4  : Serial.println("Wakeup caused by touchpad"); break;
-    case 5  : Serial.println("Wakeup caused by ULP program"); break;
-    default : Serial.println("Wakeup was not caused by deep sleep"); break;
-  }
+}
+
+
+
+String formhttpMessage(const RfidScanEvent &rfe) 
+{
+  return String(rfe.uid[0]) + String(rfe.uid[1]) + String(rfe.uid[2]) + String(rfe.uid[3]) + "   " + String(rfe.time) + "   " + String(rfe.voltage) + "    " + String(rfe.checkSum);
 }
